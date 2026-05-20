@@ -1,20 +1,24 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // Get Durable Object instance
     const id = env.MyDatabase.idFromName("main");
     const obj = env.MyDatabase.get(id);
 
-    // Serve your Cloudflare Pages site at root
+    // Serve HTML page
     if (url.pathname === "/") {
-      const page = await fetch("https://cloudflaredb-pages.yasir-ali.workers.dev"); // ← replace with your Pages URL if different
-      const html = await page.text();
-      return new Response(html, { headers: { "content-type": "text/html" } });
+      return new Response(HTML_PAGE, {
+        headers: {
+          "content-type": "text/html"
+        }
+      });
     }
 
-    // Forward other routes to Durable Object
+    // Forward API requests to Durable Object
     return obj.fetch(request);
   }
-}
+};
 
 export class MyDatabase {
   constructor(state, env) {
@@ -24,19 +28,108 @@ export class MyDatabase {
   async fetch(request) {
     const url = new URL(request.url);
 
-    if (url.pathname === "/add") {
+    // ADD RECORD
+    if (url.pathname === "/add" && request.method === "POST") {
       const { name, email } = await request.json();
-      await this.storage.put(name, { email });
-      return new Response("Added successfully");
+
+      // Save into database
+      await this.storage.put(name, { name, email });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Record saved"
+        }),
+        {
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
     }
 
+    // LIST RECORDS
     if (url.pathname === "/list") {
       const entries = await this.storage.list();
-      return new Response(JSON.stringify([...entries.values()]), {
-        headers: { "content-type": "application/json" }
+
+      const records = [];
+
+      for (const [key, value] of entries) {
+        records.push({
+          key,
+          ...value
+        });
+      }
+
+      return new Response(JSON.stringify(records), {
+        headers: {
+          "content-type": "application/json"
+        }
       });
     }
 
-    return new Response("Not found", { status: 404 });
+    return new Response("Not Found", {
+      status: 404
+    });
   }
 }
+
+const HTML_PAGE = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Cloudflare Database</title>
+</head>
+<body>
+
+<h1>Add Record</h1>
+
+<input id="name" placeholder="Name" />
+<input id="email" placeholder="Email" />
+
+<button onclick="addRecord()">Add</button>
+
+<h2>Records</h2>
+
+<ul id="records"></ul>
+
+<script>
+
+async function addRecord() {
+
+  const name = document.getElementById("name").value;
+  const email = document.getElementById("email").value;
+
+  await fetch("/add", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name,
+      email
+    })
+  });
+
+  loadRecords();
+}
+
+async function loadRecords() {
+
+  const res = await fetch("/list");
+
+  const data = await res.json();
+
+  document.getElementById("records").innerHTML =
+    data.map(r =>
+      \`<li>\${r.name} - \${r.email}</li>\`
+    ).join("");
+}
+
+loadRecords();
+
+</script>
+
+</body>
+</html>
+`;
